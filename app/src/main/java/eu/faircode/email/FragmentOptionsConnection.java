@@ -23,9 +23,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Rect;
 import android.net.ConnectivityManager;
+import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
 import android.net.NetworkRequest;
 import android.os.Build;
 import android.os.Bundle;
@@ -42,6 +45,7 @@ import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -61,8 +65,9 @@ public class FragmentOptionsConnection extends FragmentBase implements SharedPre
     private SwitchCompat swPreferIp4;
     private SwitchCompat swSslHarden;
     private Button btnManage;
-    private TextView tvConnectionType;
-    private TextView tvConnectionRoaming;
+    private TextView tvNetworkMetered;
+    private TextView tvNetworkRoaming;
+    private TextView tvNetworkInfo;
 
     private final static String[] RESET_OPTIONS = new String[]{
             "metered", "download", "roaming", "rlah", "timeout", "prefer_ip4", "ssl_harden"
@@ -87,8 +92,9 @@ public class FragmentOptionsConnection extends FragmentBase implements SharedPre
         swSslHarden = view.findViewById(R.id.swSslHarden);
         btnManage = view.findViewById(R.id.btnManage);
 
-        tvConnectionType = view.findViewById(R.id.tvConnectionType);
-        tvConnectionRoaming = view.findViewById(R.id.tvConnectionRoaming);
+        tvNetworkMetered = view.findViewById(R.id.tvNetworkMetered);
+        tvNetworkRoaming = view.findViewById(R.id.tvNetworkRoaming);
+        tvNetworkInfo = view.findViewById(R.id.tvNetworkInfo);
 
         setOptions();
 
@@ -184,8 +190,9 @@ public class FragmentOptionsConnection extends FragmentBase implements SharedPre
 
         PreferenceManager.getDefaultSharedPreferences(getContext()).registerOnSharedPreferenceChangeListener(this);
 
-        tvConnectionType.setVisibility(View.GONE);
-        tvConnectionRoaming.setVisibility(View.GONE);
+        tvNetworkMetered.setVisibility(View.GONE);
+        tvNetworkRoaming.setVisibility(View.GONE);
+        tvNetworkInfo.setVisibility(View.GONE);
 
         return view;
     }
@@ -304,17 +311,54 @@ public class FragmentOptionsConnection extends FragmentBase implements SharedPre
     };
 
     private void showConnectionType() {
-        getMainHandler().post(new Runnable() {
-            @Override
-            public void run() {
-                if (getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) {
-                    ConnectionHelper.NetworkState networkState = ConnectionHelper.getNetworkState(getContext());
+        try {
+            final ConnectionHelper.NetworkState networkState = ConnectionHelper.getNetworkState(getContext());
 
-                    tvConnectionType.setText(networkState.isUnmetered() ? R.string.title_legend_unmetered : R.string.title_legend_metered);
-                    tvConnectionType.setVisibility(networkState.isConnected() ? View.VISIBLE : View.GONE);
-                    tvConnectionRoaming.setVisibility(networkState.isRoaming() ? View.VISIBLE : View.GONE);
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getContext());
+            boolean debug = prefs.getBoolean("debug", false);
+            ConnectivityManager cm = null;
+            if (debug || BuildConfig.DEBUG)
+                cm = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            Network active = (cm == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M ? null : cm.getActiveNetwork());
+            final NetworkInfo ni = (active == null ? null : cm.getNetworkInfo(active));
+            final NetworkCapabilities nc = (active == null ? null : cm.getNetworkCapabilities(active));
+            final LinkProperties lp = (active == null ? null : cm.getLinkProperties(active));
+
+            getMainHandler().post(new Runnable() {
+                @Override
+                public void run() {
+                    if (getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) {
+                        StringBuilder sb = new StringBuilder();
+                        if (ni != null)
+                            sb.append(ni.toString()).append("\r\n\r\n");
+                        if (nc != null)
+                            sb.append(nc.toString()).append("\r\n\r\n");
+                        if (lp != null)
+                            sb.append(lp.toString()).append("\r\n\r\n");
+
+                        tvNetworkMetered.setText(networkState.isUnmetered() ? R.string.title_legend_unmetered : R.string.title_legend_metered);
+                        tvNetworkInfo.setText(sb.toString());
+                        tvNetworkMetered.setVisibility(networkState.isConnected() ? View.VISIBLE : View.GONE);
+                        tvNetworkRoaming.setVisibility(networkState.isRoaming() ? View.VISIBLE : View.GONE);
+                        tvNetworkInfo.setVisibility(sb.length() == 0 ? View.GONE : View.VISIBLE);
+
+                        if (sb.length() > 0) {
+                            Rect r = new Rect();
+                            if (tvNetworkInfo.getGlobalVisibleRect(r)) {
+                                final ScrollView scroll = getView().findViewById(R.id.scroll);
+                                getMainHandler().post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        scroll.smoothScrollTo(0, tvNetworkInfo.getBottom());
+                                    }
+                                });
+                            }
+                        }
+                    }
                 }
-            }
-        });
+            });
+        } catch (Throwable ex) {
+            Log.e(ex);
+        }
     }
 }
